@@ -24,7 +24,7 @@ class PTB(Dataset):
         self.vocab_file = 'ptb.vocab.json'
 
         if create_data:
-            print("Creating new %s ptb data."%split.upper())
+            print("Creating new %s ptb data." % split.upper())
             self._create_data()
 
         elif not os.path.exists(os.path.join(self.data_dir, self.data_file)):

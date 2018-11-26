@@ -32,6 +32,7 @@ def main(args):
         )
 
     if not os.path.exists(args.load_checkpoint):
+        print(os.path.abspath(args.load_checkpoint))
         raise FileNotFoundError(args.load_checkpoint)
 
     model.load_state_dict(torch.load(args.load_checkpoint))

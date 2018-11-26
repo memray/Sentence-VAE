@@ -25,10 +25,10 @@ def idx2word(idx, i2w, pad_idx):
     for i, sent in enumerate(idx):
 
         for word_id in sent:
-
-            if word_id == pad_idx:
+            if int(word_id) == pad_idx:
                 break
-            sent_str[i] += i2w[str(word_id)] + " "
+
+            sent_str[i] += i2w[str(int(word_id))] + " "
 
         sent_str[i] = sent_str[i].strip()
 

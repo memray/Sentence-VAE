@@ -68,8 +68,8 @@ class SentenceVAE(nn.Module):
 
         # REPARAMETERIZATION
         mean = self.hidden2mean(hidden)
-        logv = self.hidden2logv(hidden)
-        std = torch.exp(0.5 * logv)
+        variance = self.hidden2logv(hidden)
+        std = torch.exp(0.5 * variance)
 
         z = to_var(torch.randn([batch_size, self.latent_size]))
         z = z * std + mean
@@ -89,6 +89,7 @@ class SentenceVAE(nn.Module):
             prob = torch.rand(input_sequence.size())
             if torch.cuda.is_available():
                 prob=prob.cuda()
+            # ensure words of SOS and PAD are not dropped out
             prob[(input_sequence.data - self.sos_idx) * (input_sequence.data - self.pad_idx) == 0] = 1
             decoder_input_sequence = input_sequence.clone()
             decoder_input_sequence[prob < self.word_dropout_rate] = self.unk_idx
@@ -110,8 +111,7 @@ class SentenceVAE(nn.Module):
         logp = nn.functional.log_softmax(self.outputs2vocab(padded_outputs.view(-1, padded_outputs.size(2))), dim=-1)
         logp = logp.view(b, s, self.embedding.num_embeddings)
 
-
-        return logp, mean, logv, z
+        return logp, mean, variance, z
 
 
     def inference(self, n=4, z=None):
@@ -168,6 +168,8 @@ class SentenceVAE(nn.Module):
 
             # prune input and hidden state according to local update
             if len(running_seqs) > 0:
+                if len(input_sequence.shape) == 0:
+                    input_sequence = self.tensor([input_sequence]).long()
                 input_sequence = input_sequence[running_seqs]
                 hidden = hidden[:, running_seqs]
 
