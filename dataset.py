@@ -9,6 +9,8 @@ from nltk.tokenize import TweetTokenizer
 
 from utils import OrderedCounter
 
+VOCAB_PRESET_TOKENS = ['<pad>', '<unk>', '<sos>', '<eos>']
+
 class PTB(Dataset):
 
     def __init__(self, data_dir, split, create_data, **kwargs):
@@ -141,8 +143,7 @@ class PTB(Dataset):
         w2i = dict()
         i2w = dict()
 
-        special_tokens = ['<pad>', '<unk>', '<sos>', '<eos>']
-        for st in special_tokens:
+        for st in VOCAB_PRESET_TOKENS:
             i2w[len(w2i)] = st
             w2i[st] = len(w2i)
 
@@ -153,7 +154,7 @@ class PTB(Dataset):
                 w2c.update(words)
 
             for w, c in w2c.items():
-                if c > self.min_occ and w not in special_tokens:
+                if c > self.min_occ and w not in VOCAB_PRESET_TOKENS:
                     i2w[len(w2i)] = w
                     w2i[w] = len(w2i)
 
