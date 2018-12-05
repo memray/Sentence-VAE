@@ -9,10 +9,11 @@ from utils import to_var, idx2word, interpolate
 
 def main(args):
 
-    with open(args.data_dir+'/ptb.vocab.json', 'r') as file:
+    with open(args.data_dir+'/sense.vocab.json', 'r') as file:
         vocab = json.load(file)
 
     w2i, i2w = vocab['w2i'], vocab['i2w']
+    c2i, i2c, i2name, i2def = vocab['c2i'], vocab['i2c'], vocab['i2name'], vocab['i2def']
 
     model = SentenceVAE(
         vocab_size=len(w2i),
@@ -28,8 +29,12 @@ def main(args):
         embedding_dropout=args.embedding_dropout,
         latent_size=args.latent_size,
         num_layers=args.num_layers,
-        bidirectional=args.bidirectional
-        )
+        bidirectional=args.bidirectional,
+        word_vocab=w2i,
+        concept_vocab=c2i,
+        pretrained_word_embedding_path=args.pretrained_word_embedding_path,
+        pretrained_concept_embedding_path=args.pretrained_concept_embedding_path,
+    )
 
     if not os.path.exists(args.load_checkpoint):
         print(os.path.abspath(args.load_checkpoint))
@@ -63,7 +68,7 @@ if __name__ == '__main__':
 
     parser.add_argument('-dd', '--data_dir', type=str, default='data')
     parser.add_argument('-ms', '--max_sequence_length', type=int, default=50)
-    parser.add_argument('-eb', '--embedding_size', type=int, default=300)
+    parser.add_argument('-eb', '--embedding_size', type=int, default=128)
     parser.add_argument('-rnn', '--rnn_type', type=str, default='gru')
     parser.add_argument('-hs', '--hidden_size', type=int, default=256)
     parser.add_argument('-wd', '--word_dropout', type=float, default=0)
@@ -72,8 +77,11 @@ if __name__ == '__main__':
     parser.add_argument('-nl', '--num_layers', type=int, default=1)
     parser.add_argument('-bi', '--bidirectional', action='store_true')
 
-    args = parser.parse_args()
+    parser.add_argument('-we','--pretrained_word_embedding_path', type=str, default='data/sense/pretrained_embedding/word')
+    parser.add_argument('-ce','--pretrained_concept_embedding_path', type=str, default='data/sense/pretrained_embedding/cui')
 
+
+    args = parser.parse_args()
     args.rnn_type = args.rnn_type.lower()
 
     assert args.rnn_type in ['rnn', 'lstm', 'gru']

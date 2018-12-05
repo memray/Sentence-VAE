@@ -44,7 +44,7 @@ def main(args):
         latent_size=args.latent_size,
         num_layers=args.num_layers,
         bidirectional=args.bidirectional
-        )
+    )
 
     if torch.cuda.is_available():
         model = model.cuda()

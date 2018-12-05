@@ -2,12 +2,31 @@ import torch
 import torch.nn as nn
 import torch.nn.utils.rnn as rnn_utils
 from utils import to_var
+import numpy as np
+
+
+def load_vocab(vocab_path):
+    vocab_list = []
+    with open(vocab_path, 'r') as reader:
+        for l in reader.readlines():
+            vocab_list.append(l.strip().lower())
+    return vocab_list
+
+
+def load_embedding(embedding_path):
+    return np.loadtxt(embedding_path)
+
 
 class SentenceVAE(nn.Module):
 
-    def __init__(self, vocab_size, embedding_size, rnn_type, hidden_size, word_dropout, embedding_dropout, latent_size,
-                sos_idx, eos_idx, pad_idx, unk_idx, max_sequence_length, num_layers=1, bidirectional=False):
-
+    def __init__(self, vocab_size, embedding_size, rnn_type,
+                 hidden_size, word_dropout, embedding_dropout, latent_size,
+                 sos_idx, eos_idx, pad_idx, unk_idx, max_sequence_length,
+                 num_layers, bidirectional,
+                 word_vocab, concept_vocab,
+                 pretrained_word_embedding_path,
+                 pretrained_concept_embedding_path
+         ):
         super().__init__()
         self.tensor = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.Tensor
 
@@ -28,6 +47,42 @@ class SentenceVAE(nn.Module):
         self.word_dropout_rate = word_dropout
         self.embedding_dropout = nn.Dropout(p=embedding_dropout)
 
+        if pretrained_word_embedding_path:
+            pretrain_word_vocab = load_vocab(pretrained_word_embedding_path + '.vocab')
+            pretrain_w2i = dict(zip(pretrain_word_vocab, range(len(pretrain_word_vocab))))
+            pretrain_word_embedding = load_embedding(pretrained_word_embedding_path + '.vec')
+
+            wv_matrix = []
+            for word_id, word in enumerate(word_vocab):
+                if word in pretrain_word_vocab:
+                    wv_matrix.append(pretrain_word_embedding[pretrain_w2i[word]])
+                else:
+                    wv_matrix.append(np.random.uniform(-0.01, 0.01, embedding_size).astype("float32"))
+
+            wv_matrix = np.array(wv_matrix, dtype="float32")
+            print('Load pretrained word embedding: embedding.shape=%s, pretrained_embedding.shape=%s' %
+                  (str(self.embedding.weight.data.shape), wv_matrix.shape))
+            self.embedding.weight.data.copy_(torch.from_numpy(wv_matrix))
+
+        self.concept_embedding = None
+        if pretrained_concept_embedding_path:
+            self.concept_embedding = nn.Embedding(len(concept_vocab), embedding_size)
+            pretrain_concept_vocab = load_vocab(pretrained_concept_embedding_path + '.vocab')
+            pretrain_c2i = dict(zip(pretrain_word_vocab, range(len(pretrain_concept_vocab))))
+            pretrain_concept_embedding = load_embedding(pretrained_concept_embedding_path + '.vec')
+
+            cv_matrix = []
+            for c_id, concept in enumerate(concept_vocab):
+                if concept in pretrain_concept_vocab:
+                    cv_matrix.append(pretrain_concept_embedding[pretrain_c2i[word]])
+                else:
+                    cv_matrix.append(np.random.uniform(-0.01, 0.01, embedding_size).astype("float32"))
+
+            cv_matrix = np.array(cv_matrix, dtype="float32")
+            print('Load pretrained concept embedding: embedding.shape=%s, pretrained_embedding.shape=%s' %
+                  (str(self.concept_embedding.weight.data.shape), cv_matrix.shape))
+            self.concept_embedding.weight.data.copy_(torch.from_numpy(cv_matrix))
+
         if rnn_type == 'rnn':
             rnn = nn.RNN
         elif rnn_type == 'gru':
@@ -45,7 +100,10 @@ class SentenceVAE(nn.Module):
         self.hidden2mean = nn.Linear(hidden_size * self.hidden_factor, latent_size)
         self.hidden2logv = nn.Linear(hidden_size * self.hidden_factor, latent_size)
         self.latent2hidden = nn.Linear(latent_size, hidden_size * self.hidden_factor)
+        # a linear readout layer for exporting to concept vector and consistency penalty
+        self.latent2conceptembedding = nn.Linear(latent_size, embedding_size)
         self.outputs2vocab = nn.Linear(hidden_size * (2 if bidirectional else 1), vocab_size)
+
 
     def forward(self, input_sequence, length):
 
@@ -73,6 +131,9 @@ class SentenceVAE(nn.Module):
 
         z = to_var(torch.randn([batch_size, self.latent_size]))
         z = z * std + mean
+
+        # CONCEPT READOUT
+        concept_embed = self.latent2conceptembedding(z)
 
         # DECODER
         hidden = self.latent2hidden(z)
@@ -111,7 +172,7 @@ class SentenceVAE(nn.Module):
         logp = nn.functional.log_softmax(self.outputs2vocab(padded_outputs.view(-1, padded_outputs.size(2))), dim=-1)
         logp = logp.view(b, s, self.embedding.num_embeddings)
 
-        return logp, mean, variance, z
+        return logp, mean, variance, z, concept_embed
 
 
     def inference(self, n=4, z=None):
@@ -140,7 +201,7 @@ class SentenceVAE(nn.Module):
         generations = self.tensor(batch_size, self.max_sequence_length).fill_(self.pad_idx).long()
 
         t=0
-        while(t<self.max_sequence_length and len(running_seqs)>0):
+        while(t < self.max_sequence_length and len(running_seqs) > 0):
 
             if t == 0:
                 input_sequence = to_var(torch.Tensor(batch_size).fill_(self.sos_idx).long())

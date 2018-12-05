@@ -26,7 +26,8 @@ def main(args):
             split=split,
             create_data=args.create_data,
             max_sequence_length=args.max_sequence_length,
-            min_occ=args.min_occ
+            min_occ=args.min_occ,
+            pretrained_concept_embedding_path=args.pretrained_concept_embedding_path,
         )
 
     model = SentenceVAE(
@@ -44,8 +45,8 @@ def main(args):
         latent_size=args.latent_size,
         num_layers=args.num_layers,
         bidirectional=args.bidirectional,
-        word_vocab=datasets['train'].get_w2i(),
-        concept_vocab=datasets['train'].concept_vocab,
+        word_vocab=datasets['train'].w2i,
+        concept_vocab=datasets['train'].c2i,
         pretrained_word_embedding_path=args.pretrained_word_embedding_path,
         pretrained_concept_embedding_path=args.pretrained_concept_embedding_path,
     )
@@ -71,6 +72,8 @@ def main(args):
             return min(1, step/x0)
 
     NLL = torch.nn.NLLLoss(size_average=False, ignore_index=datasets['train'].pad_idx)
+    consistency_weight = args.consistency_weight
+    MSE = torch.nn.MSELoss()
 
     def loss_fn(logp, target, length, mean, logv, anneal_function, step, k, x0):
 
@@ -121,13 +124,17 @@ def main(args):
                         batch[k] = to_var(v)
 
                 # Forward pass
-                logp, mean, logv, z = model(batch['input'], batch['length'])
+                logp, mean, logv, z, concept_embed = model(batch['input'], batch['length'])
 
-                # loss calculation
+                # reconstruction loss
                 NLL_loss, KL_loss, KL_weight = loss_fn(logp, batch['target'],
                     batch['length'], mean, logv, args.anneal_function, step, args.k, args.x0)
 
-                loss = (NLL_loss + KL_weight * KL_loss) / batch_size
+                # consistency loss
+                target_concept_embed = model.concept_embedding(batch['cui_id'])
+                consistency_loss = MSE(concept_embed, target_concept_embed)
+
+                loss = (NLL_loss + KL_weight * KL_loss + consistency_weight * consistency_loss) / batch_size
 
                 # backward + optimization
                 if split == 'train':
@@ -135,7 +142,6 @@ def main(args):
                     loss.backward()
                     optimizer.step()
                     step += 1
-
 
                 # bookkeepeing
                 tracker['ELBO'] = torch.cat((tracker['ELBO'], tensor([loss.data])))
@@ -148,9 +154,13 @@ def main(args):
 
                 if iteration % args.print_every == 0 or iteration+1 == len(data_loader):
                     print("%s Batch %04d/%i, Loss %9.4f, NLL-Loss %9.4f, "
-                          "KL-Loss %9.4f, KL-Weight %6.3f"
-                        % (split.upper(), iteration, len(data_loader)-1, loss.item(), NLL_loss.item() / batch_size,
-                           KL_loss.item() / batch_size, KL_weight))
+                          "KL-Loss %9.4f, KL-Weight %6.3f, Consistency-Loss %.4f"
+                        % (split.upper(), iteration, len(data_loader)-1, loss.item(),
+                           NLL_loss.item() / batch_size,
+                           KL_loss.item() / batch_size,
+                           KL_weight,
+                           consistency_weight * consistency_loss / batch_size)
+                          )
 
                 if split == 'valid':
                     if 'target_sents' not in tracker:
@@ -163,7 +173,7 @@ def main(args):
             print("%s Epoch %02d/%i, Mean ELBO %9.4f"%(split.upper(), epoch, args.epochs, torch.mean(tracker['ELBO'])))
 
             if args.tensorboard_logging:
-                writer.add_scalar("%s-Epoch/ELBO"%split.upper(), torch.mean(tracker['ELBO']), epoch)
+                writer.add_scalar("%s-Epoch/ELBO" % split.upper(), torch.mean(tracker['ELBO']), epoch)
 
             # save a dump of all sentences and the encoded latent space
             if split == 'valid':
@@ -194,7 +204,7 @@ if __name__ == '__main__':
     parser.add_argument('-bs', '--batch_size', type=int, default=32)
     parser.add_argument('-lr', '--learning_rate', type=float, default=0.001)
 
-    parser.add_argument('-eb', '--embedding_size', type=int, default=300)
+    parser.add_argument('-eb', '--embedding_size', type=int, default=128)
     parser.add_argument('-rnn', '--rnn_type', type=str, default='gru')
     parser.add_argument('-hs', '--hidden_size', type=int, default=256)
     parser.add_argument('-nl', '--num_layers', type=int, default=1)
@@ -211,6 +221,11 @@ if __name__ == '__main__':
     parser.add_argument('-tb','--tensorboard_logging', action='store_true')
     parser.add_argument('-log','--logdir', type=str, default='logs')
     parser.add_argument('-bin','--save_model_path', type=str, default='checkpoints')
+
+    parser.add_argument('-cw','--consistency_weight', type=float, default=1.0)
+
+    parser.add_argument('-we','--pretrained_word_embedding_path', type=str, default='data/sense/pretrained_embedding/word')
+    parser.add_argument('-ce','--pretrained_concept_embedding_path', type=str, default='data/sense/pretrained_embedding/cui')
 
     args = parser.parse_args()
 

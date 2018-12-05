@@ -11,6 +11,7 @@ from utils import OrderedCounter
 
 VOCAB_PRESET_TOKENS = ['<pad>', '<unk>', '<sos>', '<eos>']
 
+
 class WordSenseDataset(Dataset):
 
     def __init__(self, data_dir, split, create_data, **kwargs):
@@ -22,8 +23,12 @@ class WordSenseDataset(Dataset):
         self.min_occ = kwargs.get('min_occ', 3)
 
         self.raw_data_path = os.path.join(data_dir, 'cui_name_def.'+split+'.txt')
-        self.data_file = 'cui.'+split+'.json'
-        self.vocab_file = 'cui.vocab.json'
+        self.data_file = 'sense.'+split+'.tensor.json'
+
+        if split == 'train' or  split == 'test':
+            self.vocab_file = 'sense.vocab.json'
+        else:
+            self.vocab_file = 'sense.valid.vocab.json'
 
         if create_data:
             print("Creating new %s cui data." % split.upper())
@@ -46,7 +51,10 @@ class WordSenseDataset(Dataset):
         return {
             'input': np.asarray(self.data[idx]['input']),
             'target': np.asarray(self.data[idx]['target']),
-            'length': self.data[idx]['length']
+            'length': self.data[idx]['length'],
+            'cui': self.data[idx]['cui'],
+            'cui_id': self.data[idx]['cui_id'],
+            'cui_name': self.data[idx]['cui_name'],
         }
 
     @property
@@ -83,6 +91,7 @@ class WordSenseDataset(Dataset):
             with open(os.path.join(self.data_dir, self.vocab_file), 'r') as file:
                 vocab = json.load(file)
             self.w2i, self.i2w = vocab['w2i'], vocab['i2w']
+            self.c2i, self.i2c, self.i2name, self.i2def = vocab['c2i'], vocab['i2c'], vocab['i2name'], vocab['i2def']
 
     def _load_vocab(self):
         with open(os.path.join(self.data_dir, self.vocab_file), 'r') as vocab_file:
@@ -92,8 +101,7 @@ class WordSenseDataset(Dataset):
         self.c2i, self.i2c, self.i2name, self.i2def = vocab['c2i'], vocab['i2c'], vocab['i2name'], vocab['i2def']
 
     def _create_data(self):
-
-        if self.split == 'train':
+        if self.split == 'train' or self.split == 'valid':
             self._create_vocab()
         else:
             self._load_vocab()
@@ -102,10 +110,15 @@ class WordSenseDataset(Dataset):
 
         data = defaultdict(dict)
         with open(self.raw_data_path, 'r') as file:
-
             for i, line in enumerate(file):
+                segs = line.split('|')
+                cui = segs[0]
+                name = segs[1]
+                def_ = segs[2]
 
-                words = tokenizer.tokenize(line)
+                concept_id = self.c2i[cui]
+
+                words = tokenizer.tokenize(def_)
 
                 input = ['<sos>'] + words
                 input = input[:self.max_sequence_length]
@@ -116,6 +129,7 @@ class WordSenseDataset(Dataset):
                 assert len(input) == len(target), "%i, %i"%(len(input), len(target))
                 length = len(input)
 
+                # pad all sequences in the dataset to the same length
                 input.extend(['<pad>'] * (self.max_sequence_length-length))
                 target.extend(['<pad>'] * (self.max_sequence_length-length))
 
@@ -126,6 +140,9 @@ class WordSenseDataset(Dataset):
                 data[id]['input'] = input
                 data[id]['target'] = target
                 data[id]['length'] = length
+                data[id]['cui'] = cui
+                data[id]['cui_id'] = concept_id
+                data[id]['cui_name'] = name
 
         with io.open(os.path.join(self.data_dir, self.data_file), 'wb') as data_file:
             data = json.dumps(data, ensure_ascii=False)
@@ -134,7 +151,7 @@ class WordSenseDataset(Dataset):
         self._load_data(vocab=False)
 
     def _create_vocab(self):
-        assert self.split == 'train', "Vocablurary can only be created for training file."
+        assert self.split == 'train' or self.split == 'valid', "Vocablurary can only be created for training file."
 
         tokenizer = TweetTokenizer(preserve_case=False)
 
@@ -150,12 +167,13 @@ class WordSenseDataset(Dataset):
             i2w[len(w2i)] = st
             w2i[st] = len(w2i)
 
+        print(os.path.abspath(self.raw_data_path))
         with open(self.raw_data_path, 'r') as file:
             for i, line in enumerate(file):
                 segs = line.split('|')
+                cui = segs[0]
                 name = segs[1]
                 def_ = segs[2]
-                cui = segs[0]
                 i2c[i] = cui
                 c2i[cui] = i
                 i2name[i] = name

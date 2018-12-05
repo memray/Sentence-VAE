@@ -26,23 +26,23 @@ PREV_ABBR_PATH = '%s/mimic/abbr' % (BASE_PATH)
 PREV_CUI_PATH = '%s/mimic/cui' % (BASE_PATH)
 PREV_CUI_DEF_PATH = '../data/sense/definition/CUI_definition.RRF'
 
-OUTPUT_BASE_PATH = '../data/sense/'
-ABBR_VOCAB_PATH = '%s/pretrained_embedding/abbr_vocab' % (OUTPUT_BASE_PATH)
-ABBR_EMB_PATH = '%s/pretrained_embedding/abbr.vec' % (OUTPUT_BASE_PATH)
+SENSE_BASE_PATH = '../data/sense/'
+ABBR_VOCAB_PATH = '%s/pretrained_embedding/abbr_vocab' % (SENSE_BASE_PATH)
+ABBR_EMB_PATH = '%s/pretrained_embedding/abbr.vec' % (SENSE_BASE_PATH)
 
-CUI_VOCAB_PATH = '%s/pretrained_embedding/cui_vocab' % (OUTPUT_BASE_PATH)
-CUI_EMB_PATH = '%s/pretrained_embedding/cui.vec' % (OUTPUT_BASE_PATH)
+CUI_VOCAB_PATH = '%s/pretrained_embedding/cui_vocab' % (SENSE_BASE_PATH)
+CUI_EMB_PATH = '%s/pretrained_embedding/cui.vec' % (SENSE_BASE_PATH)
 
-WORD_VOCAB_PATH = '%s/pretrained_embedding/word_vocab' % (OUTPUT_BASE_PATH)
-WORD_EMB_PATH = '%s/pretrained_embedding/word.vec' % (OUTPUT_BASE_PATH)
+WORD_VOCAB_PATH = '%s/pretrained_embedding/word_vocab' % (SENSE_BASE_PATH)
+WORD_EMB_PATH = '%s/pretrained_embedding/word.vec' % (SENSE_BASE_PATH)
 
 # external sense metadata (name and definition), may change to variables later
-sense_inventory_path = '../data/sense/umls/sense_inventory_with_testsets.json'
-sense_name_path = '../data/sense/umls/CUI_name.RRF'
-sense_definition_path = '../data/sense/umls/CUI_definition.RRF'
+ALL_SENSE_INVENTORY_PATH = '../data/sense/umls/sense_inventory_with_testsets.json'
+SENSE_NAME_PATH = '../data/sense/umls/CUI_name.RRF'
+SENSE_DEFINITION_PATH = '../data/sense/umls/CUI_definition.RRF'
 
-if not os.path.exists(OUTPUT_BASE_PATH):
-    os.makedirs(OUTPUT_BASE_PATH)
+if not os.path.exists(SENSE_BASE_PATH):
+    os.makedirs(SENSE_BASE_PATH)
 
 # whether it is preprocessed by Byte-Pair Encoding
 subvoc = False
@@ -142,8 +142,12 @@ def export_vocab_and_pretrained_embedding():
     print('Output vocab with same size')
 
 
-def load_CUI_values(cui_list, filepath, field):
-    cui_set = set(cui_list)
+def load_CUI_values(cui_set, filepath, field):
+    if cui_set == None:
+        print('return field values for all items')
+    else:
+        print('return field values for up to %d items' % len(cui_set))
+
     cui_name_dict = defaultdict(str)
     sense_df = pd.read_csv(filepath, sep='|', header=None, index_col=False)
 
@@ -156,10 +160,7 @@ def load_CUI_values(cui_list, filepath, field):
             # break
 
         # not a CUI we are interested in
-        if cui not in cui_set:
-            continue
-        # only take the 1st name for each sense
-        if cui in cui_name_dict:
+        if cui_set and cui not in cui_set:
             continue
 
         if isinstance(field, str):
@@ -167,9 +168,13 @@ def load_CUI_values(cui_list, filepath, field):
         elif isinstance(field, int):
             text = str(row.iloc[field])
 
-        cui_name_dict[cui] = text
+        # there might be multiple defs for one CUI
+        if cui in cui_name_dict:
+            cui_name_dict[cui] += text
+        else:
+            cui_name_dict[cui] = text
 
-    print('Found %d values for %d CUI' % (len(cui_name_dict), len(cui_set)))
+    print('Found %d values for %s CUI' % (len(cui_name_dict), str(len(cui_set)) if cui_set else 'N/A'))
     # assert len(cui_set) == len(cui_name_dict)
 
     return cui_name_dict
@@ -180,9 +185,9 @@ def export_training_definition():
                  open(CUI_VOCAB_PATH).readlines()]
     cui2id          = dict(zip(cui_list, range(len(cui_list))))
 
-    # cui_list (9k CUIs) is a subset of full_sense_inventory (30k+ CUIs)
+    # load full_sense_inventory: cui_list (9k CUIs) is a subset of full_sense_inventory (30k+ CUIs)
     full_sense_inventory = {}
-    for l in open(sense_inventory_path, 'r').readlines():
+    for l in open(ALL_SENSE_INVENTORY_PATH, 'r').readlines():
         cui_dict = json.loads(l)
         full_sense_inventory[cui_dict['CUI']] = cui_dict
 
@@ -193,10 +198,10 @@ def export_training_definition():
         else:
             cui2name[cui] = full_sense_inventory[cui]['LONGFORM'][0].strip().lower()
 
-    cui2def  = load_CUI_values(list(full_sense_inventory.keys()), filepath=sense_definition_path, field=5) # column 5 is definition
+    cui2def  = load_CUI_values(set(full_sense_inventory.keys()), filepath=SENSE_DEFINITION_PATH, field=5) # column 5 is definition
 
     # export all
-    with open(OUTPUT_BASE_PATH + 'cui_name_def.all.txt', 'w') as writer:
+    with open(SENSE_BASE_PATH + 'cui_name_def.all.txt', 'w') as writer:
         for cui, def_ in cui2def.items():
             name = cui2name[cui]
             writer.write('%s|%s|%s\n' % (cui, name, def_))
@@ -207,14 +212,14 @@ def export_training_definition():
     random.Random(2597).shuffle(cui2def_train_valid_items)
 
     # export train (90% CUIs that have both pretrained context vector and definitions)
-    with open(OUTPUT_BASE_PATH + 'cui_name_def.train.txt', 'w') as writer:
+    with open(SENSE_BASE_PATH + 'cui_name_def.train.txt', 'w') as writer:
         for cui, def_ in cui2def_train_valid_items[: int(len(cui2def_train_valid_items) * 0.9)]:
             name = cui2name[cui]
             writer.write('%s|%s|%s\n' % (cui, name, def_))
         print('Export %d CUIs for training' % int(len(cui2def_train_valid_items) * 0.9))
 
     # export train (10% CUIs that have both pretrained context vector and definitions)
-    with open(OUTPUT_BASE_PATH + 'cui_name_def.valid.txt', 'w') as writer:
+    with open(SENSE_BASE_PATH + 'cui_name_def.valid.txt', 'w') as writer:
         for cui, def_ in cui2def_train_valid_items[int(len(cui2def_train_valid_items) * 0.9): ]:
             name = cui2name[cui]
             writer.write('%s|%s|%s\n' % (cui, name, def_))
@@ -222,12 +227,72 @@ def export_training_definition():
 
     # export test (CUIs that have definitions only)
     cui2def_test = {cui: def_ for cui, def_ in cui2def.items() if cui not in cui2id}
-    with open(OUTPUT_BASE_PATH + 'cui_name_def.test.txt', 'w') as writer:
+    with open(SENSE_BASE_PATH + 'cui_name_def.test.txt', 'w') as writer:
         for cui, def_ in cui2def_test.items():
             name = cui2name[cui]
             writer.write('%s|%s|%s\n' % (cui, name, def_))
         print('Export %d CUIs for testing' % (len(cui2def_test)))
 
+def count_testset_definition():
+    testset_names = ['msh', 'share', 'umn']
+
+    cui2def  = load_CUI_values(None, filepath=SENSE_DEFINITION_PATH, field=5) # column 5 is definition
+    all_cui_set = set()
+
+    for testset_name in testset_names:
+        cui_set = set()
+        testset_inventory_path = '../data/sense/umls/' + '%s_inventory.json' % testset_name
+        abbr_cui_dict = json.load(open(testset_inventory_path, 'r'))
+
+        for abbr, cui_pairs in abbr_cui_dict.items():
+            for cuis, freq in cui_pairs.items():
+                cuis = [c.strip() for c in cuis.split(';')]
+                for cui in cuis:
+                    cui_set.add(cui)
+
+        found_def_count = 0
+        for cui in cui_set:
+            if cui in cui2def:
+                found_def_count += 1
+        print('Found {}/{} ({:.2f}%) CUIs with definition in {}'.format(
+            found_def_count, len(cui_set),
+            float(found_def_count/len(cui_set) * 100),
+            testset_name)
+        )
+
+        all_cui_set = all_cui_set.union(cui_set)
+
+    found_def_count = 0
+    for cui in all_cui_set:
+        if cui in cui2def:
+            found_def_count += 1
+    print('Found {}/{} ({:.2f}%) CUIs with definition in {}'.format(
+          found_def_count, len(all_cui_set),
+           float(found_def_count/len(all_cui_set) * 100),
+           str(testset_names)))
+
+    # load full_sense_inventory to get names
+    full_sense_inventory = {}
+    for l in open(ALL_SENSE_INVENTORY_PATH, 'r').readlines():
+        cui_dict = json.loads(l)
+        full_sense_inventory[cui_dict['CUI']] = cui_dict
+
+    cui2name = {}
+    for cui in full_sense_inventory:
+        if len(full_sense_inventory[cui]['COMMON_NAME']) > 0:
+            cui2name[cui] = full_sense_inventory[cui]['COMMON_NAME'][0].strip().lower()
+        else:
+            cui2name[cui] = full_sense_inventory[cui]['LONGFORM'][0].strip().lower()
+
+    # export all
+    with open(SENSE_BASE_PATH + 'testset_cui_name_def.all.txt', 'w') as writer:
+        for cui in all_cui_set:
+            # some defs and names are not available
+            def_ = cui2def[cui] if cui in cui2def else None
+            name = cui2name[cui] if cui in cui2name else None
+            writer.write('%s|%s|%s\n' % (cui, name, def_))
+
 if __name__ == '__main__':
     # export_vocab_and_pretrained_embedding()
-    export_training_definition()
+    # export_training_definition()
+    count_testset_definition()

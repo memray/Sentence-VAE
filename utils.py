@@ -40,7 +40,7 @@ def interpolate(start, end, steps):
 
     interpolation = np.zeros((start.shape[0], steps + 2))
 
-    for dim, (s,e) in enumerate(zip(start,end)):
+    for dim, (s,e) in enumerate(zip(start, end)):
         interpolation[dim] = np.linspace(s,e,steps+2)
 
     return interpolation.T
